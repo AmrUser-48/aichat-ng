@@ -51,6 +51,53 @@ jobs:
           rustc +nightly -Z unstable-options --print target-spec-json --target x86_64-win7-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw "This nightly does not recognize x86_64-win7-windows-msvc." }
 
+      - name: Add Windows 7 import libraries to linker search path
+        shell: pwsh
+        run: |
+          cargo +nightly fetch --locked --target x86_64-win7-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "Cargo dependency fetch failed." }
+
+          $registrySrc = Join-Path $env:USERPROFILE ".cargo\registry\src"
+          $registryCache = Join-Path $env:USERPROFILE ".cargo\registry\cache"
+          $sourceRoots = Get-ChildItem $registrySrc -Directory -ErrorAction SilentlyContinue
+          $cacheRoots = Get-ChildItem $registryCache -Directory -ErrorAction SilentlyContinue
+
+          # Cargo's Windows import-library build scripts may not recognize the
+          # custom win7 target. Ensure the prebuilt .lib files from every locked
+          # windows_x86_64_msvc crate are explicitly discoverable by link.exe.
+          foreach ($cacheRoot in $cacheRoots) {
+            $sourceRoot = Join-Path $registrySrc $cacheRoot.Name
+            New-Item -ItemType Directory -Force -Path $sourceRoot | Out-Null
+            foreach ($crate in Get-ChildItem $cacheRoot.FullName -Filter "windows_x86_64_msvc-*.crate" -File -ErrorAction SilentlyContinue) {
+              $packageName = [System.IO.Path]::GetFileNameWithoutExtension($crate.Name)
+              $unpacked = Join-Path $sourceRoot $packageName
+              if (-not (Test-Path $unpacked)) {
+                tar -xzf $crate.FullName -C $sourceRoot
+                if ($LASTEXITCODE -ne 0) { throw "Unable to unpack $($crate.Name)" }
+              }
+            }
+          }
+
+          $libDirs = @()
+          foreach ($sourceRoot in (Get-ChildItem $registrySrc -Directory -ErrorAction SilentlyContinue)) {
+            foreach ($package in (Get-ChildItem $sourceRoot.FullName -Directory -Filter "windows_x86_64_msvc-*" -ErrorAction SilentlyContinue)) {
+              $libDir = Join-Path $package.FullName "lib"
+              if (Test-Path $libDir) { $libDirs += $libDir }
+            }
+          }
+
+          if (-not ($libDirs | Where-Object { Test-Path (Join-Path $_ "windows.0.48.5.lib") })) {
+            throw "Could not locate windows.0.48.5.lib required by this dependency graph."
+          }
+
+          $flags = $env:RUSTFLAGS
+          foreach ($libDir in ($libDirs | Sort-Object -Unique)) {
+            $flags += " -L native=$libDir"
+          }
+          Add-Content -Encoding ASCII $env:GITHUB_ENV "RUSTFLAGS=$flags"
+          Write-Output "Added $($libDirs.Count) Windows MSVC import-library directories."
+          Write-Output $flags
+
       - name: Build with Windows 7 standard library and legacy-console mode
         shell: pwsh
         run: |
