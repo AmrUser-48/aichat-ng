@@ -1,0 +1,44 @@
+name: Windows 7 x64 build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  windows7:
+    name: Build Windows 7 x64
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        shell: powershell
+        run: |
+          rustup toolchain install nightly
+          rustup default nightly
+          rustup component add rust-src
+
+      - name: Install MSVC tools
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build Win7 x64
+        shell: cmd
+        run: |
+          set RUSTFLAGS=-C target-cpu=core2
+          cargo +nightly build --release -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc
+
+      - name: Package
+        shell: powershell
+        run: |
+          mkdir dist
+          copy target\x86_64-win7-windows-msvc\release\aichat.exe dist\aichat-ng-win7-x64.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aichat-ng-win7-x64
+          path: dist
