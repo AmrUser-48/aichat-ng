@@ -10,6 +10,11 @@ repository = "https://github.com/blob42/aichat-ng"
 categories = ["command-line-utilities"]
 keywords = ["chatgpt", "llm", "cli", "ai", "repl"]
 
+[features]
+default = ["terminal-colorsaurus"]
+# Legacy Windows 7 console compatibility mode.
+win7 = []
+
 [dependencies]
 anyhow = "1.0.69"
 bytes = "1.4.0"
