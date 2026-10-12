@@ -1,0 +1,74 @@
+name: Publish Windows 7 preview release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish-windows7-release.yml"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    name: Publish verified Windows 7 preview
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Download successful Windows 7 build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: aichat-ng-win7-x64
+          path: dist
+          repository: ${{ github.repository }}
+          run-id: "38229556516"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish experimental prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "win7-v0.33.0-preview.1"
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Output "Release $tag already exists; skipping duplicate publication."
+            exit 0
+          }
+
+          if (-not (Test-Path "dist\aichat-ng-win7-x64.exe")) {
+            throw "The verified Windows 7 executable was not downloaded."
+          }
+
+          @'
+          Experimental aichat-ng Windows 7 x64 build.
+
+          Built from commit 8b440e688f42e7d1852deead97cff37e92af6908.
+          Target: x86_64-win7-windows-msvc using nightly Rust build-std.
+          Requested PE OS and subsystem version: 6.01.
+          CPU baseline: Intel Core 2 compatible.
+          HTTPS backend: Rustls/ring; no OpenSSL DLL dependency.
+          The build and selected API/runtime-DLL checks passed on Windows Server 2022.
+          This binary has not been runtime-tested on a real Windows 7 installation.
+          Test on Windows 7 SP1 x64 before relying on it.
+          '@ | Set-Content -Encoding UTF8 release-notes.md
+
+          $ghArgs = @(
+            "release", "create", $tag,
+            "dist\aichat-ng-win7-x64.exe",
+            "dist\README-Windows7.txt",
+            "dist\SHA256.txt",
+            "dist\dependencies.txt",
+            "dist\imports.txt",
+            "dist\pe-headers.txt",
+            "--repo", $env:GITHUB_REPOSITORY,
+            "--target", "8b440e688f42e7d1852deead97cff37e92af6908",
+            "--title", "aichat-ng Windows 7 x64 Preview",
+            "--prerelease",
+            "--notes-file", "release-notes.md"
+          )
+          & gh @ghArgs
+          if ($LASTEXITCODE -ne 0) { throw "GitHub prerelease creation failed." }
