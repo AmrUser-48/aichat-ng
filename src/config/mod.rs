@@ -40,6 +40,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 use syntect::highlighting::ThemeSet;
+#[cfg(feature = "terminal-colorsaurus")]
 use terminal_colorsaurus::{color_scheme, ColorScheme, QueryOptions};
 
 pub const TEMP_ROLE_NAME: &str = "%%";
@@ -2359,6 +2360,7 @@ impl Config {
             if let Some(v) = read_env_value::<String>(&get_env_name("theme")) {
                 self.theme = v;
             } else if *IS_STDOUT_TERMINAL {
+                #[cfg(feature = "terminal-colorsaurus")]
                 if let Ok(color_scheme) = color_scheme(QueryOptions::default()) {
                     let theme = match color_scheme {
                         ColorScheme::Dark => "dark",

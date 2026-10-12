@@ -44,6 +44,7 @@ pub static NO_COLOR: LazyLock<bool> = LazyLock::new(|| {
         .and_then(|v| parse_bool(&v))
         .unwrap_or_default()
         || !*IS_STDOUT_TERMINAL
+        || cfg!(feature = "win7")
 });
 
 pub fn now() -> String {

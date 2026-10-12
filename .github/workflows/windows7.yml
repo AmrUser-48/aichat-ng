@@ -23,7 +23,11 @@ jobs:
     timeout-minutes: 90
     env:
       CARGO_PROFILE_RELEASE_PANIC: abort
-      RUSTFLAGS: "-C target-cpu=core2 -C link-arg=/SUBSYSTEM:CONSOLE,6.01"
+      # Pin the subsystem version to Win7 and link the Rust CRT statically.
+      RUSTFLAGS: "-C target-cpu=core2 -C target-feature=+crt-static -C link-arg=/SUBSYSTEM:CONSOLE,6.01"
+      # C dependencies (ring, Oniguruma) must use the same static MSVC CRT.
+      CFLAGS: "/MT"
+      CXXFLAGS: "/MT"
 
     steps:
       - name: Checkout
@@ -47,13 +51,13 @@ jobs:
           rustc +nightly -Z unstable-options --print target-spec-json --target x86_64-win7-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw "This nightly does not recognize x86_64-win7-windows-msvc." }
 
-      - name: Build with Windows 7 standard library
+      - name: Build with Windows 7 standard library and legacy-console mode
         shell: pwsh
         run: |
-          cargo +nightly build --locked --release -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc
+          cargo +nightly build --locked --release -Z build-std=std,panic_abort --no-default-features --features win7 --target x86_64-win7-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw "Win7 build failed." }
 
-      - name: Check binary and PE subsystem
+      - name: Check binary, CRT dependencies, and Windows API imports
         shell: pwsh
         run: |
           $exe = "target\x86_64-win7-windows-msvc\release\aichat-ng.exe"
@@ -61,19 +65,41 @@ jobs:
             Get-ChildItem "target\x86_64-win7-windows-msvc\release"
             throw "Expected binary not found: $exe"
           }
+
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item $exe "dist\aichat-ng-win7-x64.exe"
+
           dumpbin /headers "dist\aichat-ng-win7-x64.exe" | Tee-Object -FilePath "dist\pe-headers.txt"
           dumpbin /dependents "dist\aichat-ng-win7-x64.exe" | Tee-Object -FilePath "dist\dependencies.txt"
+          dumpbin /imports "dist\aichat-ng-win7-x64.exe" | Tee-Object -FilePath "dist\imports.txt"
+
+          $modernApis = 'WaitOnAddress|WakeByAddressSingle|WakeByAddressAll|GetSystemTimePreciseAsFileTime|GetDpiForWindow|GetDpiForMonitor|SetProcessDpiAwarenessContext|SetThreadDescription|GetTempPath2|CreateFile2|GetOverlappedResultEx'
+          $modernApiHits = Select-String -Path "dist\imports.txt" -Pattern $modernApis
+          if ($modernApiHits) {
+            $modernApiHits | ForEach-Object { Write-Output $_.Line }
+            throw "Found imports newer than Windows 7. Review the dependency calling these APIs."
+          }
+
+          $newerDlls = 'api-ms-win-core-synch-l1-2-0\.dll|api-ms-win-core-path-l1-1-0\.dll|VCRUNTIME140.*\.dll|MSVCP140.*\.dll|ucrtbase\.dll|api-ms-win-crt-.*\.dll'
+          $newerDllHits = Select-String -Path "dist\dependencies.txt" -Pattern $newerDlls -CaseSensitive:$false
+          if ($newerDllHits) {
+            $newerDllHits | ForEach-Object { Write-Output $_.Line }
+            throw "Binary still imports a modern Windows API set or dynamic Visual C runtime."
+          }
+
           @'
           aichat-ng Windows 7 x64 build
           Target: x86_64-win7-windows-msvc
           CPU baseline: Intel Core 2 compatible (target-cpu=core2)
           PE subsystem requested: Windows 6.01
-          TLS: reqwest with rustls (no OpenSSL DLL dependency is intended).
-          This artifact is cross-compiled; verify on a real Windows 7 SP1 system before relying on it.
+          Legacy-console mode: ANSI colors, OSC terminal probing, cursor-style changes, and bracketed paste disabled.
+          TLS: rustls/ring; no OpenSSL DLL dependency is intended.
+          CRT: statically linked where supported.
+          This artifact is cross-compiled. Validate full REPL and HTTPS on a real Windows 7 SP1 x64 system.
           '@ | Set-Content -Encoding ASCII "dist\README-Windows7.txt"
-          Get-FileHash "dist\aichat-ng-win7-x64.exe" -Algorithm SHA256 | Format-List | Out-String | Set-Content -Encoding ASCII "dist\SHA256.txt"
+
+          Get-FileHash "dist\aichat-ng-win7-x64.exe" -Algorithm SHA256 |
+            Format-List | Out-String | Set-Content -Encoding ASCII "dist\SHA256.txt"
 
       - name: Upload Win7 build artifact
         uses: actions/upload-artifact@v4

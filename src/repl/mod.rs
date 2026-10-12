@@ -21,6 +21,7 @@ use crate::utils::{
 };
 
 use anyhow::{bail, Context, Result};
+#[cfg(not(feature = "win7"))]
 use crossterm::cursor::SetCursorStyle;
 use fancy_regex::Regex;
 use reedline::CursorConfig;
@@ -279,6 +280,13 @@ Type ".help" for additional help.
         let highlighter = ReplHighlighter::new(config);
         let menu = Self::create_menu();
         let edit_mode = Self::create_edit_mode(config);
+        #[cfg(feature = "win7")]
+        let cursor_config = CursorConfig {
+            vi_insert: None,
+            vi_normal: None,
+            emacs: None,
+        };
+        #[cfg(not(feature = "win7"))]
         let cursor_config = CursorConfig {
             vi_insert: Some(SetCursorStyle::BlinkingBar),
             vi_normal: Some(SetCursorStyle::SteadyBlock),
@@ -292,9 +300,9 @@ Type ".help" for additional help.
             .with_cursor_config(cursor_config)
             .with_quick_completions(true)
             .with_partial_completions(true)
-            .use_bracketed_paste(true)
+            .use_bracketed_paste(!cfg!(feature = "win7"))
             .with_validator(Box::new(ReplValidator))
-            .with_ansi_colors(true);
+            .with_ansi_colors(!cfg!(feature = "win7"));
 
         if let Ok(cmd) = config.read().editor() {
             let temp_file = temp_file("-repl-", ".md");
